@@ -1,0 +1,46 @@
+{
+  "_comment": "Configuración persistente de la aplicación. Editar con cuidado.",
+
+  "reader": {
+    "vid": "0x0E6A",
+    "pid": "0x0317",
+    "poll_interval_ms": 300,
+    "read_timeout_ms": 500,
+    "auto_reconnect": true,
+    "reconnect_interval_s": 3
+  },
+
+  "reader_hardware": {
+    "buzzer_enabled": true,
+    "keyboard_emulation": false,
+    "output_format": "10H",
+    "led_on_read": "green"
+  },
+
+  "batch": {
+    "target_block": null,
+    "block_data_hex": "",
+    "auth_key_hex": "FFFFFFFFFFFF",
+    "auth_key_type": "A",
+    "beep_on_success": true,
+    "beep_on_error": true,
+    "led_success": "green",
+    "led_error": "red",
+    "auto_save_history": true,
+    "history_file": "batch_history.csv"
+  },
+
+  "gui": {
+    "theme": "dark",
+    "color_scheme": "blue",
+    "window_width": 1100,
+    "window_height": 700,
+    "font_size": 14,
+    "show_raw_hex": false
+  },
+
+  "logging": {
+    "level": "INFO",
+    "log_file": "rfid_manager.log"
+  }
+}

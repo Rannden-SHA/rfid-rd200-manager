@@ -1,0 +1,15 @@
+{
+  "usb_mode": 1,
+  "read_card_mode": 13,
+  "kbd_format": 5,
+  "kbd_reverse": 2,
+  "kbd_add_type": 0,
+  "postponement_time": 5,
+  "same_card_time": 15,
+  "keypad_delay": 10,
+  "mifare_sector": 0,
+  "_meta": {
+    "created": "2026-03-20T14:26:09.219433",
+    "source_serial": "24450268"
+  }
+}

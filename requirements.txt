@@ -1,0 +1,20 @@
+# ============================================================
+# RFID Wristband Manager - Dependencias
+# Compatible con Python 3.9+
+# ============================================================
+
+# --- GUI ---
+customtkinter==5.2.2          # Framework de GUI moderno sobre Tkinter
+Pillow==10.3.0                # Manejo de imágenes para la GUI
+
+# --- Comunicación USB/HID ---
+hidapi==0.14.0                # Comunicación HID (interfaz primaria del RD200)
+pyusb==1.2.1                  # Acceso USB de bajo nivel (fallback / inspección)
+libusb-package==1.0.26.1      # Backend libusb para pyusb en Windows
+
+# --- Utilidades ---
+pyserial==3.5                 # Fallback si el lector expone puerto COM
+playsound==1.2.2              # Sonido de confirmación en modo batch
+
+# --- Desarrollo / Opcional ---
+# pyinstaller==6.6.0          # Para generar ejecutable .exe
