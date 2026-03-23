@@ -44,7 +44,12 @@ def setup_logging(level: str = "INFO", log_file: str = "rfid_manager.log") -> No
     root_logger.addHandler(console_handler)
 
     # Handler de archivo rotativo (máx 5MB × 3 archivos)
-    log_path = Path(log_file)
+    # En modo .exe, guardar el log junto al ejecutable
+    import sys
+    if getattr(sys, 'frozen', False):
+        log_path = Path(os.path.dirname(sys.executable)) / log_file
+    else:
+        log_path = Path(log_file)
     try:
         file_handler = logging.handlers.RotatingFileHandler(
             filename=log_path,

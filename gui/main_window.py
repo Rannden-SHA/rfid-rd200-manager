@@ -140,11 +140,16 @@ class MainWindow(ctk.CTk):
         self._status_bar.grid(row=2, column=0, sticky="ew")
 
     # -------------------------------------------------------------------------
-    # Ciclo de conexión
+    # Ciclo de conexión con hot-swap automático
     # -------------------------------------------------------------------------
 
     def _start_connection_loop(self):
         """Intenta conectar al lector en un hilo para no bloquear la GUI."""
+        # Cancelar cualquier reconexión programada previa
+        if self._reconnect_job:
+            self.after_cancel(self._reconnect_job)
+            self._reconnect_job = None
+
         threading.Thread(
             target=self._connect_worker,
             daemon=True,
@@ -154,6 +159,14 @@ class MainWindow(ctk.CTk):
     def _connect_worker(self):
         """Worker que intenta conectar y lanza el polling si lo logra."""
         self.after(0, lambda: self._status_bar.set_state("searching"))
+
+        # IMPORTANTE: desconectar limpiamente antes de reconectar
+        # Esto permite hot-swap de lectores
+        try:
+            self._reader.disconnect()
+        except Exception:
+            pass
+
         try:
             self._reader.connect()
             self.after(0, self._on_connected)
@@ -192,7 +205,7 @@ class MainWindow(ctk.CTk):
         """Programa un reintento de conexión."""
         self._status_bar.set_state(
             "disconnected",
-            detail=f"Reintentando en {self._reconnect_interval}s..."
+            detail=f"Buscando lector... (cada {self._reconnect_interval}s)"
         )
         interval_ms = self._reconnect_interval * 1000
         self._reconnect_job = self.after(interval_ms, self._start_connection_loop)
@@ -204,13 +217,13 @@ class MainWindow(ctk.CTk):
 
     def _on_reader_disconnected(self):
         """Reacciona a la desconexión del lector."""
-        self._status_bar.set_state("disconnected")
-        self._sniffer_tab.on_reader_disconnected()
-        # Programar reconexión
-        self._reconnect_job = self.after(
-            self._reconnect_interval * 1000,
-            self._start_connection_loop
+        self._status_bar.set_state(
+            "disconnected",
+            detail="Lector desconectado. Esperando nuevo lector..."
         )
+        self._sniffer_tab.on_reader_disconnected()
+        # Reconectar rápido (1s) para detectar nuevo lector
+        self._reconnect_job = self.after(1000, self._start_connection_loop)
 
     @property
     def _reconnect_interval(self) -> int:

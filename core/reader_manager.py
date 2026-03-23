@@ -60,7 +60,7 @@ class ReaderManager:
 
     POLL_INTERVAL = 0.3     # 300ms entre polls en modo comando
     READ_TIMEOUT_MS = 500   # Timeout para leer respuestas
-    MAX_CONSECUTIVE_ERRORS = 5
+    MAX_CONSECUTIVE_ERRORS = 3
 
     def __init__(self):
         self._device = None
@@ -100,10 +100,12 @@ class ReaderManager:
         """
         Conecta al lector. Enumera interfaces HID y prueba cada una
         enviando un comando real (Get S/N).
+        Si ya hay una conexión activa, la cierra primero para permitir
+        hot-swap de lectores.
         """
         if self._device is not None:
-            logger.warning("Ya hay una conexion activa.")
-            return True
+            logger.info("Cerrando conexion previa antes de reconectar...")
+            self.disconnect()
 
         if self._try_connect_hid():
             return True

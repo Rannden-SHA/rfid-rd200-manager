@@ -7,6 +7,7 @@
 import json
 import logging
 import os
+import sys
 import threading
 from datetime import datetime
 from typing import Optional
@@ -17,12 +18,17 @@ from core.reader_manager import ReaderManager, ReaderConnectionError
 
 logger = logging.getLogger(__name__)
 
-PROFILES_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "config", "profiles"
-)
-AUTO_PROFILE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+
+def _get_app_dir() -> str:
+    """Devuelve la carpeta raíz de la app (funciona tanto en dev como en .exe)."""
+    if getattr(sys, 'frozen', False):
+        # Ejecutable PyInstaller: usar la carpeta donde está el .exe
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+PROFILES_DIR = os.path.join(_get_app_dir(), "config", "profiles")
+AUTO_PROFILE_PATH = os.path.join(_get_app_dir(),
     "config", "auto_profile.json"
 )
 
@@ -49,7 +55,8 @@ class ReaderConfigTab(ctk.CTkFrame):
         0x05: "8H  (8 hex chars)",
         0x06: "10D (10 decimal)",
         0x07: "10H (10 hex chars)",
-        0x08: "Custom",
+        0x08: "14H (14 hex chars)",
+        0x09: "Custom",
     }
     KBD_FORMAT_VALUES = {v: k for k, v in KBD_FORMATS.items()}
 
@@ -64,8 +71,9 @@ class ReaderConfigTab(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self._reader = reader
         self._current_config: dict = {}
-        self._auto_replicate = False
         self._auto_profile: Optional[dict] = self._load_auto_profile()
+        # Si hay un perfil guardado, activar auto-replicar por defecto
+        self._auto_replicate = self._auto_profile is not None
         self._readers_configured = 0
 
         self.grid_columnconfigure(0, weight=1)
@@ -74,6 +82,10 @@ class ReaderConfigTab(ctk.CTkFrame):
         self._build_header()
         self._build_main()
         self._build_footer()
+
+        # Sincronizar el switch con el estado
+        if self._auto_replicate:
+            self._auto_replicate_var.set(True)
 
     # =====================================================================
     # UI Construction
@@ -555,7 +567,7 @@ class ReaderConfigTab(ctk.CTkFrame):
         """Worker thread para aplicar configuración."""
         try:
             profile = self._build_profile_from_ui()
-            results = self._reader.apply_config_profile(profile)
+            results = self._apply_profile_safe(profile)
 
             ok_count = sum(1 for v in results.values() if v)
             fail_count = sum(1 for v in results.values() if not v)
@@ -573,6 +585,41 @@ class ReaderConfigTab(ctk.CTkFrame):
         finally:
             self.after(0, lambda: self._apply_btn.configure(
                 state="normal", text="Aplicar Cambios"))
+
+    def _apply_profile_safe(self, profile: dict) -> dict:
+        """
+        Aplica un perfil parando el polling primero para evitar conflictos.
+        El polling interfiere con los comandos de configuración porque ambos
+        compiten por el dispositivo HID simultáneamente.
+        """
+        import time
+
+        # Parar polling para tener acceso exclusivo al lector
+        was_polling = self._reader.is_polling
+        if was_polling:
+            logger.info("Parando polling para aplicar configuración...")
+            self._reader.stop_polling()
+            time.sleep(0.3)  # Esperar a que el polling se detenga completamente
+
+        try:
+            results = self._reader.apply_config_profile(profile)
+        finally:
+            # Reiniciar polling si estaba activo
+            if was_polling and self._reader.is_connected:
+                logger.info("Reiniciando polling tras aplicar configuración.")
+                self._restart_polling()
+
+        return results
+
+    def _restart_polling(self):
+        """Reinicia el polling desde el hilo de GUI."""
+        # Buscar el MainWindow padre para acceder a los callbacks de polling
+        parent = self.winfo_toplevel()
+        if hasattr(parent, '_on_card_from_polling') and hasattr(parent, '_on_polling_error'):
+            self._reader.start_polling(
+                callback=parent._on_card_from_polling,
+                on_error=parent._on_polling_error,
+            )
 
     def _build_profile_from_ui(self) -> dict:
         """Construye un dict de perfil desde los valores actuales de la UI."""
@@ -729,37 +776,59 @@ class ReaderConfigTab(ctk.CTkFrame):
         Llamado desde MainWindow cuando se conecta un lector.
         Si auto-replicar está activo, aplica el perfil automáticamente.
         """
+        logger.info(
+            f"on_reader_connected: auto_replicate={self._auto_replicate}, "
+            f"has_profile={self._auto_profile is not None}")
+
         if self._auto_replicate and self._auto_profile:
+            sn = self._reader.serial_number or "desconocido"
             self._log_result(
-                f"Nuevo lector detectado (SN: {self._reader.serial_number}).\n"
+                f"Nuevo lector detectado (SN: {sn}).\n"
                 "Aplicando perfil automáticamente..."
             )
             threading.Thread(
                 target=self._auto_apply_worker, daemon=True).start()
 
     def _auto_apply_worker(self):
-        """Worker para auto-aplicar perfil."""
+        """Worker para auto-aplicar perfil. Para el polling primero."""
         try:
             import time
             time.sleep(0.5)  # Dar tiempo al lector para estabilizarse
-            results = self._reader.apply_config_profile(self._auto_profile)
+
+            # Aplicar perfil con acceso exclusivo (para polling)
+            results = self._apply_profile_safe(self._auto_profile)
+
             ok = sum(1 for v in results.values() if v)
             fail = sum(1 for v in results.values() if not v)
-            self._readers_configured += 1
+
+            if ok > 0:
+                self._readers_configured += 1
+
+            sn = self._reader.serial_number or "?"
 
             self.after(0, lambda: self._replicate_counter.configure(
                 text=f"Lectores configurados: {self._readers_configured}"))
-            self.after(0, lambda: self._log_result(
-                f"Auto-replicar completado: {ok} OK, {fail} errores\n"
-                f"SN: {self._reader.serial_number}\n"
-                f"Total lectores: {self._readers_configured}"))
+
+            if fail == 0:
+                self.after(0, lambda: self._log_result(
+                    f"Auto-replicar OK: {ok} parámetros aplicados\n"
+                    f"SN: {sn}\n"
+                    f"Total lectores configurados: {self._readers_configured}"))
+            else:
+                lines = [f"Auto-replicar: {ok} OK, {fail} errores"]
+                for param, success in results.items():
+                    lines.append(f"  {param}: {'OK' if success else 'FALLO'}")
+                lines.append(f"SN: {sn}")
+                self.after(0, lambda: self._log_result("\n".join(lines)))
+
             self.after(0, lambda: self._status_label.configure(
-                text=f"Auto-config aplicada a SN:{self._reader.serial_number} "
+                text=f"Auto-config aplicada a SN:{sn} "
                      f"({self._readers_configured} lectores)"))
 
-            # Beep para indicar éxito
+            # Beep + LED verde para indicar éxito
             try:
-                self._reader.beep_green()
+                if ok > 0:
+                    self._reader.reader_action(0x02)  # Beep + LED verde
             except Exception:
                 pass
 
